@@ -7,10 +7,14 @@ feito em React Native com JavaScript para Snack Expo e Expo Go.
 
 [Abrir SafeMove no Snack Expo](https://snack.expo.dev/@soaresdev0109/661322)
 
+O Snack utiliza o SDK 54 para manter compatibilidade com o Expo Go distribuído
+pela App Store em dispositivos iOS físicos. O projeto local permanece no SDK 55.
+
 ## Executar no Snack Expo
 
 1. Abra [snack.expo.dev](https://snack.expo.dev).
-2. Crie um Snack em branco e selecione o SDK 55.
+2. Crie um Snack em branco e selecione o SDK 54 para testar em um iPhone físico
+   com o Expo Go da App Store.
 3. Substitua o conteúdo de `App.js` pelo arquivo deste projeto.
 4. Adicione as dependências listadas em `package.json` no painel de dependências.
 5. Abra o QR Code com o Expo Go em um iPhone físico.
