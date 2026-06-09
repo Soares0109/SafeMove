@@ -32,7 +32,8 @@ Leia o QR Code com o Expo Go. Os sensores funcionam melhor em um aparelho físic
 
 ## Recursos implementados
 
-- Login comum e autenticação biométrica com `expo-local-authentication`
+- Login comum e autenticação biométrica real com `expo-local-authentication`,
+  sem aceitar o código do aparelho como substituto da biometria
 - GPS com `expo-location`, mapa da posição atual e atalho para o Apple Maps
 - Câmera e prévia da foto com `expo-camera`
 - Leitura e detecção de movimento brusco com `expo-sensors`
@@ -55,7 +56,7 @@ Leia o QR Code com o Expo Go. Os sensores funcionam melhor em um aparelho físic
 - Câmera, localização e acelerômetro devem ser demonstrados em um iPhone físico.
 - Notificações locais funcionam no Expo Go após a permissão do usuário.
 - O Touch ID funciona no Expo Go. Por limitação oficial do Expo, o Face ID no
-  iOS pode exigir uma development build; o app trata essa situação com uma
-  mensagem amigável.
+  iOS exige uma development build; o app detecta o Expo Go, explica a limitação
+  e não registra o código do aparelho como autenticação biométrica.
 - O monitoramento do acelerômetro ocorre enquanto o app está aberto. O projeto
   não solicita localização ou execução contínua em segundo plano.

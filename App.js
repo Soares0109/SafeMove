@@ -23,6 +23,7 @@ import {
   View,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import Constants from 'expo-constants';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Location from 'expo-location';
@@ -421,6 +422,8 @@ function LoginScreen() {
   const [isLoading, setIsLoading] = useState(false);
   const [isBiometricLoading, setIsBiometricLoading] = useState(false);
   const [biometricLabel, setBiometricLabel] = useState('Face ID / Touch ID');
+  const isIosExpoGo =
+    Platform.OS === 'ios' && Constants.expoGoConfig != null;
 
   useEffect(() => {
     async function identifyBiometricType() {
@@ -470,9 +473,10 @@ function LoginScreen() {
   async function handleBiometricLogin() {
     try {
       setIsBiometricLoading(true);
-      const [hasHardware, isEnrolled] = await Promise.all([
+      const [hasHardware, isEnrolled, types] = await Promise.all([
         LocalAuthentication.hasHardwareAsync(),
         LocalAuthentication.isEnrolledAsync(),
+        LocalAuthentication.supportedAuthenticationTypesAsync(),
       ]);
 
       if (!hasHardware) {
@@ -491,9 +495,21 @@ function LoginScreen() {
         return;
       }
 
+      const hasFaceId = types.includes(
+        LocalAuthentication.AuthenticationType.FACIAL_RECOGNITION
+      );
+      if (isIosExpoGo && hasFaceId) {
+        Alert.alert(
+          'Face ID indisponível no Expo Go',
+          'O Expo Go para iOS não possui a permissão nativa necessária para testar o Face ID. Use o login comum nesta versão ou instale uma development build do SafeMove.'
+        );
+        return;
+      }
+
       const result = await LocalAuthentication.authenticateAsync({
         promptMessage: 'Entrar no SafeMove',
-        fallbackLabel: 'Usar código do dispositivo',
+        disableDeviceFallback: true,
+        fallbackLabel: '',
         cancelLabel: 'Cancelar',
       });
 
@@ -585,6 +601,18 @@ function LoginScreen() {
             onPress={handleBiometricLogin}
             variant="secondary"
           />
+          {isIosExpoGo ? (
+            <View style={styles.biometricNotice}>
+              <Ionicons
+                name="information-circle-outline"
+                size={16}
+                color={COLORS.amber}
+              />
+              <Text style={styles.biometricNoticeText}>
+                No Expo Go para iPhone, o Face ID exige uma development build.
+              </Text>
+            </View>
+          ) : null}
         </View>
 
         <View style={styles.loginFootnote}>
@@ -1767,6 +1795,21 @@ const styles = StyleSheet.create({
     gap: 7,
     justifyContent: 'center',
     marginTop: 20,
+  },
+  biometricNotice: {
+    alignItems: 'flex-start',
+    backgroundColor: COLORS.amberSoft,
+    borderRadius: 12,
+    flexDirection: 'row',
+    gap: 7,
+    marginTop: 12,
+    padding: 10,
+  },
+  biometricNoticeText: {
+    color: '#805416',
+    flex: 1,
+    fontSize: 10,
+    lineHeight: 15,
   },
   loginFootnoteText: {
     color: '#9FB2C1',

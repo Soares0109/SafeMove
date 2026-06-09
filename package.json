@@ -16,6 +16,7 @@
     "@react-navigation/native-stack": "^7.17.2",
     "expo": "~55.0.26",
     "expo-camera": "~55.0.19",
+    "expo-constants": "~55.0.16",
     "expo-font": "~55.0.8",
     "expo-local-authentication": "~55.0.14",
     "expo-location": "~55.1.10",
