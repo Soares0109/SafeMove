@@ -13,6 +13,7 @@ import {
   FlatList,
   Image,
   KeyboardAvoidingView,
+  Linking,
   Platform,
   Pressable,
   ScrollView,
@@ -29,6 +30,7 @@ import { Accelerometer } from 'expo-sensors';
 import * as LocalAuthentication from 'expo-local-authentication';
 import * as Notifications from 'expo-notifications';
 import { CameraView, useCameraPermissions } from 'expo-camera';
+import MapView, { Marker } from 'react-native-maps';
 import { NavigationContainer, useIsFocused } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -795,6 +797,14 @@ function LocationScreen() {
   const [message, setMessage] = useState(
     lastSaved ? 'Última posição salva no aparelho.' : 'Pronto para localizar.'
   );
+  const mapRegion = location
+    ? {
+        latitude: location.latitude,
+        longitude: location.longitude,
+        latitudeDelta: 0.008,
+        longitudeDelta: 0.008,
+      }
+    : null;
 
   async function updateLocation() {
     try {
@@ -851,6 +861,26 @@ function LocationScreen() {
     }
   }
 
+  async function openInMaps() {
+    if (!location) return;
+
+    const label = encodeURIComponent('Minha localização no SafeMove');
+    const coordinates = `${location.latitude},${location.longitude}`;
+    const url =
+      Platform.OS === 'ios'
+        ? `https://maps.apple.com/?ll=${coordinates}&q=${label}`
+        : `https://www.google.com/maps/search/?api=1&query=${coordinates}`;
+
+    try {
+      await Linking.openURL(url);
+    } catch {
+      Alert.alert(
+        'Não foi possível abrir o mapa',
+        'Tente novamente depois de atualizar sua localização.'
+      );
+    }
+  }
+
   return (
     <ScreenShell>
       <StatusBar style="dark" />
@@ -861,19 +891,42 @@ function LocationScreen() {
       />
 
       <View style={styles.mapVisual}>
-        <View style={styles.mapGridHorizontalOne} />
-        <View style={styles.mapGridHorizontalTwo} />
-        <View style={styles.mapGridVerticalOne} />
-        <View style={styles.mapGridVerticalTwo} />
-        <View style={styles.mapRoute} />
-        <View style={styles.locationPulse}>
-          <View style={styles.locationPin}>
-            <Ionicons name="location" size={24} color={COLORS.surface} />
+        {mapRegion ? (
+          <MapView
+            mapType="standard"
+            region={mapRegion}
+            showsCompass
+            showsMyLocationButton
+            showsUserLocation
+            style={styles.map}
+          >
+            <Marker
+              coordinate={mapRegion}
+              description={`${shortCoordinate(
+                location.latitude
+              )}, ${shortCoordinate(location.longitude)}`}
+              pinColor={COLORS.blue}
+              title="Você está aqui"
+            />
+          </MapView>
+        ) : (
+          <View style={styles.mapPlaceholder}>
+            <View style={styles.mapPlaceholderIcon}>
+              <Ionicons name="map-outline" size={30} color={COLORS.blue} />
+            </View>
+            <Text style={styles.mapPlaceholderTitle}>
+              Sua posição aparecerá aqui
+            </Text>
+            <Text style={styles.mapPlaceholderText}>
+              Atualize a localização para visualizar o mapa.
+            </Text>
           </View>
-        </View>
+        )}
         <View style={styles.gpsBadge}>
           <View style={styles.gpsBadgeDot} />
-          <Text style={styles.gpsBadgeText}>GPS</Text>
+          <Text style={styles.gpsBadgeText}>
+            {location ? 'POSIÇÃO ATUAL' : 'GPS'}
+          </Text>
         </View>
       </View>
 
@@ -917,6 +970,16 @@ function LocationScreen() {
           onPress={updateLocation}
         />
       </View>
+      {location ? (
+        <View style={styles.secondaryPageButtonWrap}>
+          <PrimaryButton
+            icon="map-outline"
+            label="Abrir no Mapas"
+            onPress={openInMaps}
+            variant="secondary"
+          />
+        </View>
+      ) : null}
     </ScreenShell>
   );
 }
@@ -1904,80 +1967,36 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     position: 'relative',
   },
-  mapGridHorizontalOne: {
-    backgroundColor: '#F4F8FA',
-    height: 22,
-    left: -20,
-    position: 'absolute',
-    right: -20,
-    top: 52,
-    transform: [{ rotate: '-7deg' }],
+  map: {
+    height: '100%',
+    width: '100%',
   },
-  mapGridHorizontalTwo: {
-    backgroundColor: '#F4F8FA',
-    bottom: 37,
-    height: 30,
-    left: -20,
-    position: 'absolute',
-    right: -20,
-    transform: [{ rotate: '9deg' }],
-  },
-  mapGridVerticalOne: {
-    backgroundColor: '#F4F8FA',
-    bottom: -30,
-    left: 65,
-    position: 'absolute',
-    top: -30,
-    transform: [{ rotate: '17deg' }],
-    width: 20,
-  },
-  mapGridVerticalTwo: {
-    backgroundColor: '#EDF4F7',
-    bottom: -30,
-    position: 'absolute',
-    right: 70,
-    top: -30,
-    transform: [{ rotate: '-12deg' }],
-    width: 33,
-  },
-  mapRoute: {
-    borderColor: COLORS.blue,
-    borderRadius: 70,
-    borderWidth: 4,
-    height: 120,
-    left: 55,
-    opacity: 0.7,
-    position: 'absolute',
-    top: 60,
-    transform: [{ rotate: '-16deg' }],
-    width: 210,
-  },
-  locationPulse: {
+  mapPlaceholder: {
     alignItems: 'center',
-    backgroundColor: 'rgba(23,105,255,0.18)',
-    borderRadius: 40,
-    height: 80,
+    backgroundColor: '#E6EFF4',
+    flex: 1,
     justifyContent: 'center',
-    left: '50%',
-    marginLeft: -40,
-    marginTop: -40,
-    position: 'absolute',
-    top: '50%',
-    width: 80,
+    paddingHorizontal: 30,
   },
-  locationPin: {
+  mapPlaceholderIcon: {
     alignItems: 'center',
-    backgroundColor: COLORS.blue,
-    borderColor: COLORS.surface,
-    borderRadius: 24,
-    borderWidth: 4,
-    height: 48,
+    backgroundColor: COLORS.blueSoft,
+    borderRadius: 22,
+    height: 64,
     justifyContent: 'center',
-    shadowColor: COLORS.blue,
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.3,
-    shadowRadius: 12,
-    width: 48,
+    width: 64,
+  },
+  mapPlaceholderTitle: {
+    color: COLORS.ink,
+    fontSize: 15,
+    fontWeight: '900',
+    marginTop: 13,
+  },
+  mapPlaceholderText: {
+    color: COLORS.muted,
+    fontSize: 11,
+    marginTop: 4,
+    textAlign: 'center',
   },
   gpsBadge: {
     alignItems: 'center',
@@ -2062,6 +2081,10 @@ const styles = StyleSheet.create({
   },
   pageButtonWrap: {
     marginHorizontal: 20,
+  },
+  secondaryPageButtonWrap: {
+    marginHorizontal: 20,
+    marginTop: 10,
   },
   monitorCard: {
     backgroundColor: COLORS.surface,

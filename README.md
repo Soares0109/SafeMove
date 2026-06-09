@@ -33,7 +33,7 @@ Leia o QR Code com o Expo Go. Os sensores funcionam melhor em um aparelho físic
 ## Recursos implementados
 
 - Login comum e autenticação biométrica com `expo-local-authentication`
-- GPS com `expo-location`
+- GPS com `expo-location`, mapa da posição atual e atalho para o Apple Maps
 - Câmera e prévia da foto com `expo-camera`
 - Leitura e detecção de movimento brusco com `expo-sensors`
 - Notificações locais com `expo-notifications`
