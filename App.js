@@ -31,7 +31,6 @@ import { Accelerometer } from 'expo-sensors';
 import * as LocalAuthentication from 'expo-local-authentication';
 import * as Notifications from 'expo-notifications';
 import { CameraView, useCameraPermissions } from 'expo-camera';
-import MapView, { Marker } from 'react-native-maps';
 import { NavigationContainer, useIsFocused } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -61,6 +60,7 @@ const COLORS = {
 const STORAGE_KEYS = {
   user: '@safemove/user',
   history: '@safemove/history',
+  activeIncident: '@safemove/active-incident',
 };
 
 const EVENT_META = {
@@ -79,6 +79,16 @@ const EVENT_META = {
     icon: 'camera-outline',
     color: COLORS.amber,
     soft: COLORS.amberSoft,
+  },
+  incident: {
+    icon: 'shield-outline',
+    color: COLORS.red,
+    soft: COLORS.redSoft,
+  },
+  resolved: {
+    icon: 'checkmark-circle-outline',
+    color: COLORS.green,
+    soft: COLORS.greenSoft,
   },
 };
 
@@ -99,6 +109,10 @@ Notifications.setNotificationHandler({
 const AppContext = createContext(null);
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
+const NativeMaps =
+  Platform.OS === 'web' ? null : require('react-native-maps');
+const MapView = NativeMaps?.default;
+const Marker = NativeMaps?.Marker;
 
 function formatDateTime(timestamp) {
   const date = new Date(timestamp);
@@ -144,8 +158,8 @@ async function sendMovementNotification() {
 
     await Notifications.scheduleNotificationAsync({
       content: {
-        title: 'SafeMove: movimento brusco',
-        body: 'Um movimento acima do limite de segurança foi detectado.',
+        title: 'SafeMove: você está bem?',
+        body: 'Um movimento brusco abriu uma ocorrência. Registre o local e evidências.',
         sound: true,
         data: { screen: 'Movimento' },
       },
@@ -159,20 +173,28 @@ async function sendMovementNotification() {
 function AppProvider({ children }) {
   const [user, setUser] = useState(null);
   const [history, setHistory] = useState([]);
+  const [activeIncident, setActiveIncident] = useState(null);
   const [isMonitoring, setIsMonitoring] = useState(true);
   const [isBooting, setIsBooting] = useState(true);
   const historyRef = useRef([]);
+  const activeIncidentRef = useRef(null);
 
   useEffect(() => {
     async function restoreSession() {
       try {
-        const [savedUser, savedHistory] = await Promise.all([
+        const [savedUser, savedHistory, savedIncident] = await Promise.all([
           AsyncStorage.getItem(STORAGE_KEYS.user),
           loadHistoryFromStorage(),
+          AsyncStorage.getItem(STORAGE_KEYS.activeIncident),
         ]);
 
         historyRef.current = savedHistory;
         setHistory(savedHistory);
+        if (savedIncident) {
+          const parsedIncident = JSON.parse(savedIncident);
+          activeIncidentRef.current = parsedIncident;
+          setActiveIncident(parsedIncident);
+        }
         if (savedUser) setUser(savedUser);
       } finally {
         setIsBooting(false);
@@ -211,6 +233,120 @@ function AppProvider({ children }) {
     return completeEvent;
   }, []);
 
+  const persistIncident = useCallback(async (incident) => {
+    activeIncidentRef.current = incident;
+    setActiveIncident(incident);
+
+    if (incident) {
+      await AsyncStorage.setItem(
+        STORAGE_KEYS.activeIncident,
+        JSON.stringify(incident)
+      );
+    } else {
+      await AsyncStorage.removeItem(STORAGE_KEYS.activeIncident);
+    }
+  }, []);
+
+  const createIncident = useCallback(
+    async (intensity) => {
+      const currentIncident = activeIncidentRef.current;
+      if (currentIncident) {
+        await addEvent({
+          type: 'movement',
+          title: 'Novo impacto na ocorrência ativa',
+          detail: `Intensidade aproximada: ${intensity.toFixed(2)} g`,
+          intensity,
+          incidentId: currentIncident.id,
+        });
+        return currentIncident;
+      }
+
+      const incident = {
+        id: `INC-${Date.now()}`,
+        startedAt: Date.now(),
+        intensity,
+        location: null,
+        evidenceCount: 0,
+      };
+
+      await persistIncident(incident);
+      await addEvent({
+        type: 'incident',
+        title: 'Movimento brusco: possível ocorrência',
+        detail: `Impacto de ${intensity.toFixed(
+          2
+        )} g. Registre o local e uma evidência da situação.`,
+        intensity,
+        incidentId: incident.id,
+      });
+      return incident;
+    },
+    [addEvent, persistIncident]
+  );
+
+  const recordLocation = useCallback(
+    async (coordinates) => {
+      const currentIncident = activeIncidentRef.current;
+      if (currentIncident) {
+        await persistIncident({
+          ...currentIncident,
+          location: coordinates,
+        });
+      }
+
+      return addEvent({
+        type: 'location',
+        title: currentIncident
+          ? 'Local da ocorrência registrado'
+          : 'Ponto seguro registrado',
+        detail: `${shortCoordinate(coordinates.latitude)}, ${shortCoordinate(
+          coordinates.longitude
+        )}`,
+        incidentId: currentIncident?.id,
+        ...coordinates,
+      });
+    },
+    [addEvent, persistIncident]
+  );
+
+  const recordPhoto = useCallback(
+    async (photoUri) => {
+      const currentIncident = activeIncidentRef.current;
+      if (currentIncident) {
+        await persistIncident({
+          ...currentIncident,
+          evidenceCount: currentIncident.evidenceCount + 1,
+          lastPhotoUri: photoUri,
+        });
+      }
+
+      return addEvent({
+        type: 'photo',
+        title: currentIncident
+          ? 'Evidência adicionada à ocorrência'
+          : 'Registro preventivo realizado',
+        detail: currentIncident
+          ? 'Imagem do local ou da situação vinculada à ocorrência.'
+          : 'Imagem registrada preventivamente durante o trajeto.',
+        incidentId: currentIncident?.id,
+      });
+    },
+    [addEvent, persistIncident]
+  );
+
+  const resolveIncident = useCallback(async () => {
+    const currentIncident = activeIncidentRef.current;
+    if (!currentIncident) return;
+
+    await addEvent({
+      type: 'resolved',
+      title: 'Ocorrência encerrada',
+      detail: `Usuário confirmou que está bem. ${currentIncident.evidenceCount} evidência(s) registrada(s).`,
+      incidentId: currentIncident.id,
+    });
+    await persistIncident(null);
+  }, [addEvent, persistIncident]);
+
   const signIn = useCallback(
     async (name, method = 'Acesso comum') => {
       const cleanName = name.trim() || 'Usuário SafeMove';
@@ -234,16 +370,24 @@ function AppProvider({ children }) {
   const clearHistory = useCallback(async () => {
     historyRef.current = [];
     setHistory([]);
-    await AsyncStorage.removeItem(STORAGE_KEYS.history);
-  }, []);
+    await Promise.all([
+      AsyncStorage.removeItem(STORAGE_KEYS.history),
+      persistIncident(null),
+    ]);
+  }, [persistIncident]);
 
   const value = useMemo(
     () => ({
       user,
       history,
+      activeIncident,
       isBooting,
       isMonitoring,
       addEvent,
+      createIncident,
+      recordLocation,
+      recordPhoto,
+      resolveIncident,
       signIn,
       signOut,
       clearHistory,
@@ -251,10 +395,15 @@ function AppProvider({ children }) {
     }),
     [
       addEvent,
+      activeIncident,
       clearHistory,
+      createIncident,
       history,
       isBooting,
       isMonitoring,
+      recordLocation,
+      recordPhoto,
+      resolveIncident,
       signIn,
       signOut,
       user,
@@ -398,8 +547,125 @@ function EventRow({ event }) {
         <Text numberOfLines={2} style={styles.eventDetail}>
           {event.detail}
         </Text>
+        {event.incidentId ? (
+          <View style={styles.incidentTag}>
+            <Ionicons name="shield-outline" size={11} color={COLORS.blue} />
+            <Text style={styles.incidentTagText}>Vinculado à ocorrência</Text>
+          </View>
+        ) : null}
         <Text style={styles.eventTime}>{formatDateTime(event.timestamp)}</Text>
       </View>
+    </View>
+  );
+}
+
+function IncidentCard({ incident, navigation, onResolve, compact = false }) {
+  if (!incident) return null;
+
+  const steps = [
+    {
+      label: 'Impacto detectado',
+      complete: true,
+      icon: 'pulse-outline',
+    },
+    {
+      label: 'Local registrado',
+      complete: Boolean(incident.location),
+      icon: 'location-outline',
+    },
+    {
+      label: 'Evidência fotográfica',
+      complete: incident.evidenceCount > 0,
+      icon: 'camera-outline',
+    },
+  ];
+
+  return (
+    <View style={[styles.incidentCard, compact && styles.incidentCardCompact]}>
+      <View style={styles.incidentCardHeader}>
+        <View style={styles.incidentCardIcon}>
+          <Ionicons name="alert-circle" size={24} color={COLORS.red} />
+        </View>
+        <View style={styles.incidentCardHeading}>
+          <Text style={styles.incidentCardEyebrow}>OCORRÊNCIA ATIVA</Text>
+          <Text style={styles.incidentCardTitle}>Você está bem?</Text>
+          <Text style={styles.incidentCardTime}>
+            Detectada em {formatDateTime(incident.startedAt)}
+          </Text>
+        </View>
+      </View>
+
+      <Text style={styles.incidentCardDescription}>
+        Documente o local e a situação antes de encerrar este registro de
+        segurança.
+      </Text>
+
+      <View style={styles.incidentSteps}>
+        {steps.map((step) => (
+          <View key={step.label} style={styles.incidentStep}>
+            <View
+              style={[
+                styles.incidentStepIcon,
+                step.complete && styles.incidentStepIconComplete,
+              ]}
+            >
+              <Ionicons
+                name={step.complete ? 'checkmark' : step.icon}
+                size={14}
+                color={step.complete ? COLORS.surface : COLORS.muted}
+              />
+            </View>
+            <Text
+              style={[
+                styles.incidentStepText,
+                step.complete && styles.incidentStepTextComplete,
+              ]}
+            >
+              {step.label}
+            </Text>
+          </View>
+        ))}
+      </View>
+
+      {navigation ? (
+        <View style={styles.incidentActions}>
+          <Pressable
+            onPress={() => navigation.navigate('Localização')}
+            style={({ pressed }) => [
+              styles.incidentAction,
+              pressed && styles.buttonPressed,
+            ]}
+          >
+            <Ionicons name="location-outline" size={17} color={COLORS.blue} />
+            <Text style={styles.incidentActionText}>Registrar local</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => navigation.navigate('Câmera')}
+            style={({ pressed }) => [
+              styles.incidentAction,
+              pressed && styles.buttonPressed,
+            ]}
+          >
+            <Ionicons name="camera-outline" size={17} color={COLORS.blue} />
+            <Text style={styles.incidentActionText}>Adicionar foto</Text>
+          </Pressable>
+        </View>
+      ) : null}
+
+      {onResolve ? (
+        <Pressable
+          onPress={onResolve}
+          style={({ pressed }) => [
+            styles.incidentResolveButton,
+            pressed && styles.buttonPressed,
+          ]}
+        >
+          <Ionicons name="checkmark-circle-outline" size={18} color="#08734A" />
+          <Text style={styles.incidentResolveText}>
+            Estou bem, encerrar ocorrência
+          </Text>
+        </Pressable>
+      ) : null}
     </View>
   );
 }
@@ -627,10 +893,20 @@ function LoginScreen() {
 }
 
 function DashboardScreen({ navigation }) {
-  const { user, history, isMonitoring, signOut } = useSafeMove();
+  const {
+    user,
+    history,
+    activeIncident,
+    isMonitoring,
+    resolveIncident,
+    signOut,
+  } = useSafeMove();
 
   const lastAlert = useMemo(
-    () => history.find((event) => event.type === 'movement'),
+    () =>
+      history.find(
+        (event) => event.type === 'incident' || event.type === 'movement'
+      ),
     [history]
   );
   const lastLocation = useMemo(
@@ -641,7 +917,7 @@ function DashboardScreen({ navigation }) {
   const actions = [
     {
       label: 'Localização',
-      caption: 'Registrar posição',
+      caption: activeIncident ? 'Documentar ocorrência' : 'Registrar ponto seguro',
       icon: 'location',
       color: COLORS.green,
       soft: COLORS.greenSoft,
@@ -657,7 +933,7 @@ function DashboardScreen({ navigation }) {
     },
     {
       label: 'Câmera',
-      caption: 'Registrar evidência',
+      caption: activeIncident ? 'Adicionar evidência' : 'Registro preventivo',
       icon: 'camera',
       color: COLORS.amber,
       soft: COLORS.amberSoft,
@@ -678,6 +954,20 @@ function DashboardScreen({ navigation }) {
       { text: 'Cancelar', style: 'cancel' },
       { text: 'Sair', style: 'destructive', onPress: signOut },
     ]);
+  }
+
+  function confirmResolveIncident() {
+    Alert.alert(
+      'Encerrar ocorrência?',
+      'Confirme apenas se você está bem. Os registros permanecerão no histórico.',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Estou bem',
+          onPress: resolveIncident,
+        },
+      ]
+    );
   }
 
   return (
@@ -707,19 +997,37 @@ function DashboardScreen({ navigation }) {
           <View style={styles.protectionRing}>
             <View style={styles.protectionRingInner}>
               <Ionicons
-                name={isMonitoring ? 'shield-checkmark' : 'shield-outline'}
+                name={
+                  activeIncident
+                    ? 'alert-circle'
+                    : isMonitoring
+                    ? 'shield-checkmark'
+                    : 'shield-outline'
+                }
                 size={39}
-                color={isMonitoring ? COLORS.green : COLORS.amber}
+                color={
+                  activeIncident
+                    ? COLORS.red
+                    : isMonitoring
+                    ? COLORS.green
+                    : COLORS.amber
+                }
               />
             </View>
           </View>
           <View style={styles.protectionContent}>
             <StatusPill active={isMonitoring} />
             <Text style={styles.protectionTitle}>
-              {isMonitoring ? 'Você está protegido' : 'Proteção em espera'}
+              {activeIncident
+                ? 'Ocorrência em andamento'
+                : isMonitoring
+                ? 'Você está protegido'
+                : 'Proteção em espera'}
             </Text>
             <Text style={styles.protectionDescription}>
-              {isMonitoring
+              {activeIncident
+                ? 'O SafeMove aguarda o registro do local e de evidências.'
+                : isMonitoring
                 ? 'O acelerômetro está acompanhando movimentos acima do limite.'
                 : 'Ative o monitoramento na aba Movimento.'}
             </Text>
@@ -728,9 +1036,30 @@ function DashboardScreen({ navigation }) {
       </View>
 
       <View style={styles.dashboardBody}>
+        {activeIncident ? (
+          <IncidentCard
+            incident={activeIncident}
+            navigation={navigation}
+            onResolve={confirmResolveIncident}
+          />
+        ) : (
+          <View style={styles.purposeCard}>
+            <View style={styles.purposeIcon}>
+              <Ionicons name="walk-outline" size={24} color={COLORS.blue} />
+            </View>
+            <View style={styles.purposeContent}>
+              <Text style={styles.purposeTitle}>Proteção durante o trajeto</Text>
+              <Text style={styles.purposeText}>
+                Em caso de queda ou impacto, o SafeMove abre uma ocorrência para
+                registrar local e evidências.
+              </Text>
+            </View>
+          </View>
+        )}
+
         <View style={styles.sectionHeadingRow}>
           <Text style={styles.sectionTitle}>Acesso rápido</Text>
-          <Text style={styles.sectionMeta}>SENSORES</Text>
+          <Text style={styles.sectionMeta}>AÇÕES DE SEGURANÇA</Text>
         </View>
 
         <View style={styles.actionGrid}>
@@ -775,7 +1104,7 @@ function DashboardScreen({ navigation }) {
           <Text style={styles.summaryDetail}>
             {lastAlert
               ? formatDateTime(lastAlert.timestamp)
-              : 'Movimentos bruscos aparecerão aqui.'}
+              : 'Possíveis ocorrências aparecerão aqui.'}
           </Text>
         </View>
 
@@ -807,13 +1136,15 @@ function DashboardScreen({ navigation }) {
 }
 
 function LocationScreen() {
-  const { addEvent, history } = useSafeMove();
+  const { activeIncident, history, recordLocation } = useSafeMove();
   const lastSaved = useMemo(
     () => history.find((event) => event.type === 'location'),
     [history]
   );
   const [location, setLocation] = useState(
-    lastSaved
+    activeIncident?.location
+      ? activeIncident.location
+      : lastSaved
       ? {
           latitude: lastSaved.latitude,
           longitude: lastSaved.longitude,
@@ -823,7 +1154,13 @@ function LocationScreen() {
   );
   const [isLoading, setIsLoading] = useState(false);
   const [message, setMessage] = useState(
-    lastSaved ? 'Última posição salva no aparelho.' : 'Pronto para localizar.'
+    activeIncident
+      ? activeIncident.location
+        ? 'Local já vinculado à ocorrência.'
+        : 'Ocorrência aguardando localização.'
+      : lastSaved
+      ? 'Último ponto seguro salvo no aparelho.'
+      : 'Pronto para registrar um ponto seguro.'
   );
   const mapRegion = location
     ? {
@@ -833,6 +1170,17 @@ function LocationScreen() {
         longitudeDelta: 0.008,
       }
     : null;
+
+  useEffect(() => {
+    if (!activeIncident) return;
+
+    setLocation(activeIncident.location || null);
+    setMessage(
+      activeIncident.location
+        ? 'Local já vinculado à ocorrência.'
+        : 'Ocorrência aguardando localização.'
+    );
+  }, [activeIncident]);
 
   async function updateLocation() {
     try {
@@ -869,15 +1217,12 @@ function LocationScreen() {
       };
 
       setLocation(coordinates);
-      setMessage('Localização atualizada e salva com segurança.');
-      await addEvent({
-        type: 'location',
-        title: 'Localização registrada',
-        detail: `${shortCoordinate(coordinates.latitude)}, ${shortCoordinate(
-          coordinates.longitude
-        )}`,
-        ...coordinates,
-      });
+      setMessage(
+        activeIncident
+          ? 'Local vinculado à ocorrência ativa.'
+          : 'Ponto seguro atualizado e salvo.'
+      );
+      await recordLocation(coordinates);
     } catch {
       setMessage('Não foi possível obter a localização agora.');
       Alert.alert(
@@ -913,13 +1258,34 @@ function LocationScreen() {
     <ScreenShell>
       <StatusBar style="dark" />
       <ScreenTitle
-        description="Capture sua posição atual e mantenha um registro local para situações de segurança."
-        eyebrow="GPS EM TEMPO REAL"
+        description={
+          activeIncident
+            ? 'Registre onde a possível ocorrência aconteceu para completar o relato de segurança.'
+            : 'Salve um ponto seguro durante seu trajeto para manter uma referência de localização.'
+        }
+        eyebrow={activeIncident ? 'DOCUMENTAR OCORRÊNCIA' : 'PONTO SEGURO'}
         title="Localização"
       />
 
+      {activeIncident ? (
+        <View style={styles.contextBanner}>
+          <View style={[styles.contextBannerIcon, styles.contextBannerIconRed]}>
+            <Ionicons name="shield-outline" size={20} color={COLORS.red} />
+          </View>
+          <View style={styles.contextBannerContent}>
+            <Text style={styles.contextBannerTitle}>
+              Ocorrência aguardando localização
+            </Text>
+            <Text style={styles.contextBannerText}>
+              Ao atualizar, estas coordenadas serão vinculadas ao impacto
+              detectado.
+            </Text>
+          </View>
+        </View>
+      ) : null}
+
       <View style={styles.mapVisual}>
-        {mapRegion ? (
+        {mapRegion && MapView && Marker ? (
           <MapView
             mapType="standard"
             region={mapRegion}
@@ -946,7 +1312,9 @@ function LocationScreen() {
               Sua posição aparecerá aqui
             </Text>
             <Text style={styles.mapPlaceholderText}>
-              Atualize a localização para visualizar o mapa.
+              {Platform.OS === 'web'
+                ? 'O mapa real será exibido ao abrir o SafeMove no smartphone.'
+                : 'Atualize a localização para visualizar o mapa.'}
             </Text>
           </View>
         )}
@@ -993,7 +1361,11 @@ function LocationScreen() {
       <View style={styles.pageButtonWrap}>
         <PrimaryButton
           icon="navigate"
-          label="Atualizar localização"
+          label={
+            activeIncident
+              ? 'Registrar local da ocorrência'
+              : 'Registrar ponto seguro'
+          }
           loading={isLoading}
           onPress={updateLocation}
         />
@@ -1012,8 +1384,14 @@ function LocationScreen() {
   );
 }
 
-function MovementScreen() {
-  const { addEvent, isMonitoring, setIsMonitoring } = useSafeMove();
+function MovementScreen({ navigation }) {
+  const {
+    activeIncident,
+    createIncident,
+    isMonitoring,
+    resolveIncident,
+    setIsMonitoring,
+  } = useSafeMove();
   const [sensorData, setSensorData] = useState({ x: 0, y: 0, z: 0 });
   const [intensity, setIntensity] = useState(0);
   const [isAvailable, setIsAvailable] = useState(true);
@@ -1047,12 +1425,7 @@ function MovementScreen() {
           ) {
             lastAlertAtRef.current = now;
             setLastAlert(now);
-            addEvent({
-              type: 'movement',
-              title: 'Movimento brusco detectado',
-              detail: `Intensidade aproximada: ${nextIntensity.toFixed(2)} g`,
-              intensity: nextIntensity,
-            });
+            createIncident(nextIntensity);
             sendMovementNotification();
           }
         });
@@ -1066,7 +1439,7 @@ function MovementScreen() {
       mounted = false;
       subscription?.remove();
     };
-  }, [addEvent, isMonitoring]);
+  }, [createIncident, isMonitoring]);
 
   async function toggleMonitoring() {
     if (!isMonitoring) {
@@ -1091,6 +1464,17 @@ function MovementScreen() {
     setIsMonitoring(!isMonitoring);
   }
 
+  function confirmResolveIncident() {
+    Alert.alert(
+      'Você está bem?',
+      'Ao confirmar, a ocorrência será encerrada e continuará disponível no histórico.',
+      [
+        { text: 'Ainda não', style: 'cancel' },
+        { text: 'Sim, estou bem', onPress: resolveIncident },
+      ]
+    );
+  }
+
   const movementRatio = Math.min(intensity / 3.5, 1);
   const isDanger = intensity >= MOVEMENT_THRESHOLD;
 
@@ -1098,7 +1482,7 @@ function MovementScreen() {
     <ScreenShell>
       <StatusBar style="dark" />
       <ScreenTitle
-        description="Observe os eixos do acelerômetro e receba alertas quando o aparelho sofrer movimentos bruscos."
+        description="O acelerômetro identifica possíveis quedas ou impactos e abre uma ocorrência para documentação."
         eyebrow="ACELERÔMETRO"
         title="Movimento"
       />
@@ -1177,7 +1561,7 @@ function MovementScreen() {
           <View style={styles.alertCardContent}>
             <Text style={styles.alertCardTitle}>Movimento brusco detectado</Text>
             <Text style={styles.alertCardDescription}>
-              Alerta salvo em {formatDateTime(lastAlert)}.
+              Uma possível ocorrência foi aberta em {formatDateTime(lastAlert)}.
             </Text>
           </View>
         </View>
@@ -1195,6 +1579,15 @@ function MovementScreen() {
         </View>
       )}
 
+      {activeIncident ? (
+        <IncidentCard
+          compact
+          incident={activeIncident}
+          navigation={navigation}
+          onResolve={confirmResolveIncident}
+        />
+      ) : null}
+
       <View style={styles.pageButtonWrap}>
         <PrimaryButton
           icon={isMonitoring ? 'pause' : 'play'}
@@ -1210,7 +1603,7 @@ function MovementScreen() {
 }
 
 function CameraScreen() {
-  const { addEvent } = useSafeMove();
+  const { activeIncident, recordPhoto } = useSafeMove();
   const isFocused = useIsFocused();
   const cameraRef = useRef(null);
   const [permission, requestPermission] = useCameraPermissions();
@@ -1229,11 +1622,7 @@ function CameraScreen() {
         quality: 0.72,
       });
       setPhoto(result.uri);
-      await addEvent({
-        type: 'photo',
-        title: 'Foto registrada',
-        detail: 'Imagem capturada pela câmera do SafeMove.',
-      });
+      await recordPhoto(result.uri);
     } catch {
       Alert.alert(
         'Não foi possível fotografar',
@@ -1263,10 +1652,48 @@ function CameraScreen() {
     <ScreenShell>
       <StatusBar style="dark" />
       <ScreenTitle
-        description="Registre uma imagem do ambiente. O evento será adicionado ao histórico local."
-        eyebrow="REGISTRO VISUAL"
+        description={
+          activeIncident
+            ? 'Fotografe o local, danos ou condições que ajudem a documentar a ocorrência.'
+            : 'Registre preventivamente uma condição de risco encontrada durante o trajeto.'
+        }
+        eyebrow={activeIncident ? 'EVIDÊNCIA DA OCORRÊNCIA' : 'REGISTRO PREVENTIVO'}
         title="Câmera"
       />
+
+      <View
+        style={[
+          styles.contextBanner,
+          !activeIncident && styles.contextBannerPreventive,
+        ]}
+      >
+        <View
+          style={[
+            styles.contextBannerIcon,
+            activeIncident
+              ? styles.contextBannerIconRed
+              : styles.contextBannerIconBlue,
+          ]}
+        >
+          <Ionicons
+            name={activeIncident ? 'shield-outline' : 'eye-outline'}
+            size={20}
+            color={activeIncident ? COLORS.red : COLORS.blue}
+          />
+        </View>
+        <View style={styles.contextBannerContent}>
+          <Text style={styles.contextBannerTitle}>
+            {activeIncident
+              ? 'Foto será vinculada à ocorrência'
+              : 'Registro preventivo do trajeto'}
+          </Text>
+          <Text style={styles.contextBannerText}>
+            {activeIncident
+              ? 'Fotografe o local do impacto, danos ou uma situação de risco.'
+              : 'Use a câmera para documentar iluminação ruim, obstáculos ou locais inseguros.'}
+          </Text>
+        </View>
+      </View>
 
       {!permission.granted ? (
         <View style={styles.permissionCard}>
@@ -1307,7 +1734,9 @@ function CameraScreen() {
             <Image source={{ uri: photo }} style={styles.cameraPreview} />
             <View style={styles.photoSavedBadge}>
               <Ionicons name="checkmark-circle" size={18} color={COLORS.green} />
-              <Text style={styles.photoSavedText}>Foto registrada</Text>
+              <Text style={styles.photoSavedText}>
+                {activeIncident ? 'Evidência vinculada' : 'Registro preventivo'}
+              </Text>
             </View>
           </View>
           <View style={styles.cameraButtonRow}>
@@ -1386,7 +1815,7 @@ function CameraScreen() {
 }
 
 function HistoryScreen() {
-  const { history, clearHistory } = useSafeMove();
+  const { activeIncident, history, clearHistory } = useSafeMove();
 
   function confirmClearHistory() {
     if (!history.length) return;
@@ -1422,8 +1851,7 @@ function HistoryScreen() {
           <Text style={styles.eyebrow}>REGISTROS LOCAIS</Text>
           <Text style={styles.screenTitle}>Histórico</Text>
           <Text style={styles.screenDescription}>
-            {history.length} evento{history.length === 1 ? '' : 's'} salvo
-            {history.length === 1 ? '' : 's'} neste aparelho.
+            Linha do tempo local com impactos, locais, evidências e encerramentos.
           </Text>
         </View>
         <Pressable
@@ -1447,6 +1875,11 @@ function HistoryScreen() {
         ]}
         data={history}
         keyExtractor={(item) => item.id}
+        ListHeaderComponent={
+          activeIncident ? (
+            <IncidentCard incident={activeIncident} />
+          ) : null
+        }
         ListEmptyComponent={
           <EmptyState
             description="Use os sensores do SafeMove para criar seus primeiros registros."
@@ -1932,6 +2365,155 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     letterSpacing: 1.3,
   },
+  purposeCard: {
+    alignItems: 'flex-start',
+    backgroundColor: COLORS.blueSoft,
+    borderColor: '#D4E2FF',
+    borderRadius: 18,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 12,
+    marginBottom: 22,
+    padding: 14,
+  },
+  purposeIcon: {
+    alignItems: 'center',
+    backgroundColor: COLORS.surface,
+    borderRadius: 13,
+    height: 44,
+    justifyContent: 'center',
+    width: 44,
+  },
+  purposeContent: {
+    flex: 1,
+  },
+  purposeTitle: {
+    color: COLORS.ink,
+    fontSize: 13,
+    fontWeight: '900',
+  },
+  purposeText: {
+    color: COLORS.muted,
+    fontSize: 11,
+    lineHeight: 16,
+    marginTop: 4,
+  },
+  incidentCard: {
+    backgroundColor: COLORS.surface,
+    borderColor: '#FFD1D7',
+    borderRadius: 20,
+    borderWidth: 1,
+    marginBottom: 22,
+    padding: 16,
+  },
+  incidentCardCompact: {
+    marginHorizontal: 20,
+    marginTop: 14,
+  },
+  incidentCardHeader: {
+    alignItems: 'flex-start',
+    flexDirection: 'row',
+    gap: 11,
+  },
+  incidentCardIcon: {
+    alignItems: 'center',
+    backgroundColor: COLORS.redSoft,
+    borderRadius: 13,
+    height: 44,
+    justifyContent: 'center',
+    width: 44,
+  },
+  incidentCardHeading: {
+    flex: 1,
+  },
+  incidentCardEyebrow: {
+    color: COLORS.red,
+    fontSize: 9,
+    fontWeight: '900',
+    letterSpacing: 1.2,
+  },
+  incidentCardTitle: {
+    color: COLORS.ink,
+    fontSize: 17,
+    fontWeight: '900',
+    marginTop: 3,
+  },
+  incidentCardTime: {
+    color: COLORS.muted,
+    fontSize: 9,
+    marginTop: 3,
+  },
+  incidentCardDescription: {
+    color: COLORS.muted,
+    fontSize: 11,
+    lineHeight: 16,
+    marginTop: 13,
+  },
+  incidentSteps: {
+    gap: 8,
+    marginTop: 14,
+  },
+  incidentStep: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 8,
+  },
+  incidentStepIcon: {
+    alignItems: 'center',
+    backgroundColor: '#EDF2F5',
+    borderRadius: 10,
+    height: 25,
+    justifyContent: 'center',
+    width: 25,
+  },
+  incidentStepIconComplete: {
+    backgroundColor: COLORS.green,
+  },
+  incidentStepText: {
+    color: COLORS.muted,
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  incidentStepTextComplete: {
+    color: COLORS.ink,
+  },
+  incidentActions: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 15,
+  },
+  incidentAction: {
+    alignItems: 'center',
+    backgroundColor: COLORS.blueSoft,
+    borderRadius: 12,
+    flex: 1,
+    flexDirection: 'row',
+    gap: 5,
+    justifyContent: 'center',
+    minHeight: 42,
+    paddingHorizontal: 7,
+  },
+  incidentActionText: {
+    color: COLORS.blue,
+    fontSize: 10,
+    fontWeight: '900',
+  },
+  incidentResolveButton: {
+    alignItems: 'center',
+    backgroundColor: COLORS.greenSoft,
+    borderRadius: 12,
+    flexDirection: 'row',
+    gap: 7,
+    justifyContent: 'center',
+    marginTop: 9,
+    minHeight: 43,
+    paddingHorizontal: 10,
+  },
+  incidentResolveText: {
+    color: '#08734A',
+    fontSize: 11,
+    fontWeight: '900',
+  },
   actionGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -2120,6 +2702,49 @@ const styles = StyleSheet.create({
   infoStripSubtext: {
     color: COLORS.muted,
     fontSize: 10,
+    marginTop: 3,
+  },
+  contextBanner: {
+    alignItems: 'flex-start',
+    backgroundColor: COLORS.redSoft,
+    borderColor: '#FFD5DA',
+    borderRadius: 17,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 14,
+    marginHorizontal: 20,
+    padding: 13,
+  },
+  contextBannerPreventive: {
+    backgroundColor: COLORS.blueSoft,
+    borderColor: '#D4E2FF',
+  },
+  contextBannerIcon: {
+    alignItems: 'center',
+    borderRadius: 11,
+    height: 38,
+    justifyContent: 'center',
+    width: 38,
+  },
+  contextBannerIconRed: {
+    backgroundColor: COLORS.surface,
+  },
+  contextBannerIconBlue: {
+    backgroundColor: COLORS.surface,
+  },
+  contextBannerContent: {
+    flex: 1,
+  },
+  contextBannerTitle: {
+    color: COLORS.ink,
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  contextBannerText: {
+    color: COLORS.muted,
+    fontSize: 10,
+    lineHeight: 15,
     marginTop: 3,
   },
   pageButtonWrap: {
@@ -2516,6 +3141,24 @@ const styles = StyleSheet.create({
     fontSize: 9,
     fontWeight: '700',
     marginTop: 7,
+  },
+  incidentTag: {
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    backgroundColor: COLORS.blueSoft,
+    borderRadius: 999,
+    flexDirection: 'row',
+    gap: 4,
+    marginTop: 7,
+    paddingHorizontal: 7,
+    paddingVertical: 4,
+  },
+  incidentTagText: {
+    color: COLORS.blue,
+    fontSize: 8,
+    fontWeight: '900',
+    letterSpacing: 0.3,
+    textTransform: 'uppercase',
   },
   emptyState: {
     alignItems: 'center',

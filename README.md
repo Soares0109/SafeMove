@@ -3,6 +3,15 @@
 Aplicativo mobile de monitoramento inteligente de movimento e segurança pessoal,
 feito em React Native com JavaScript para Snack Expo e Expo Go.
 
+## Propósito
+
+O SafeMove protege e documenta o usuário durante deslocamentos. Quando o
+acelerômetro identifica uma possível queda ou impacto, o aplicativo abre uma
+ocorrência ativa. O usuário pode registrar o local do acontecimento com o GPS,
+fotografar o ambiente ou danos como evidência e confirmar que está bem para
+encerrar o caso. Fora de uma ocorrência, localização e câmera funcionam como
+registros preventivos do trajeto.
+
 ## Projeto no Snack Expo
 
 [Abrir SafeMove no Snack Expo](https://snack.expo.dev/@soaresdev0109/661322)
@@ -34,9 +43,11 @@ Leia o QR Code com o Expo Go. Os sensores funcionam melhor em um aparelho físic
 
 - Login comum e autenticação biométrica real com `expo-local-authentication`,
   sem aceitar o código do aparelho como substituto da biometria
-- GPS com `expo-location`, mapa da posição atual e atalho para o Apple Maps
-- Câmera e prévia da foto com `expo-camera`
-- Leitura e detecção de movimento brusco com `expo-sensors`
+- Ocorrência ativa persistente conectando todos os sensores
+- GPS com `expo-location` para registrar pontos seguros ou o local da ocorrência
+- Mapa da posição atual e atalho para o Apple Maps
+- Câmera com `expo-camera` para evidências ou registros preventivos
+- Detecção de possíveis quedas e impactos com `expo-sensors`
 - Notificações locais com `expo-notifications`
 - Histórico e sessão persistidos com AsyncStorage
 - Native Stack e Bottom Tabs com React Navigation
@@ -44,12 +55,12 @@ Leia o QR Code com o Expo Go. Os sensores funcionam melhor em um aparelho físic
 ## Roteiro de apresentação
 
 1. Faça login com nome ou e-mail e mostre o evento no Histórico.
-2. Abra Localização, permita o GPS e registre uma posição.
-3. Abra Movimento, mova o iPhone e mostre os eixos X, Y e Z.
-4. Faça um movimento rápido para demonstrar alerta, notificação e histórico.
-5. Abra Câmera, permita o acesso e tire uma foto.
-6. Confira todos os registros no Histórico e demonstre o botão de limpar.
-7. Use o botão de sair no canto superior da tela Início.
+2. Abra Movimento, mova o iPhone e mostre os eixos X, Y e Z.
+3. Faça um movimento rápido para abrir uma possível ocorrência.
+4. Na ocorrência ativa, abra Localização e registre o local do impacto.
+5. Abra Câmera e fotografe uma evidência da situação.
+6. Volte ao Início, mostre o checklist completo e encerre a ocorrência.
+7. Confira a linha do tempo vinculada no Histórico.
 
 ## Observações para iOS
 
