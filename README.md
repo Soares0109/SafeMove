@@ -3,6 +3,10 @@
 Aplicativo mobile de monitoramento inteligente de movimento e segurança pessoal,
 feito em React Native com JavaScript para Snack Expo e Expo Go.
 
+## Projeto no Snack Expo
+
+[Abrir SafeMove no Snack Expo](https://snack.expo.dev/@soaresdev0109/661322)
+
 ## Executar no Snack Expo
 
 1. Abra [snack.expo.dev](https://snack.expo.dev).
