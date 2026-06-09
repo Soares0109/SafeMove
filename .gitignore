@@ -1,0 +1,6 @@
+node_modules/
+.expo/
+.expo-shared/
+.expo-validation*/
+dist/
+npm-debug.log*

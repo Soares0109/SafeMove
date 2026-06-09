@@ -1,0 +1,48 @@
+{
+  "expo": {
+    "name": "SafeMove",
+    "slug": "safemove",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "O SafeMove usa a câmera para registrar imagens de segurança.",
+        "NSFaceIDUsageDescription": "O SafeMove usa o Face ID para proteger o acesso ao aplicativo.",
+        "NSLocationWhenInUseUsageDescription": "O SafeMove usa sua localização para registrar sua posição durante o uso."
+      }
+    },
+    "android": {
+      "permissions": [
+        "CAMERA",
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION",
+        "VIBRATE"
+      ]
+    },
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Permita que o SafeMove acesse a câmera para registrar imagens de segurança.",
+          "recordAudioAndroid": false
+        }
+      ],
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "Permita que o SafeMove use o Face ID para proteger seu acesso."
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Permita que o SafeMove use sua localização durante o uso."
+        }
+      ],
+      "expo-notifications",
+      "expo-font"
+    ]
+  }
+}
